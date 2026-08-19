@@ -23,6 +23,23 @@ endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+# Warnings on. Verified against GCC 11 / Qt 6.2.4 and MSVC 19.44: the whole
+# tree builds with exactly zero warnings, so there is no noise budget to spend
+# and a new warning means something real.
+#
+# NOT -Werror / /WX, deliberately. A future compiler inventing a new warning
+# would break the build for someone merely trying to evaluate RockyGuard, and
+# an example repo that will not compile is worse than one that is chatty. CI
+# greps the logs instead.
+#
+# Qt and OpenSSL headers arrive through IMPORTED targets, which CMake treats as
+# SYSTEM includes, so third-party headers stay quiet on their own.
+if(MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra)
+endif()
+
 include(cmake/RockyGuard.cmake)
 
 # MUST come before any add_subdirectory that calls add_test(). CMake silently

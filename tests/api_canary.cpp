@@ -109,7 +109,11 @@ static void enumSurface() {
 // It used to be called from main(), and against the real SDK that terminated the
 // process with 0xC0000409 and no output. See probeBadKey() below for what
 // actually happens and why it matters.
-static void verifierSurface() {
+//
+// [[maybe_unused]] because never calling it is the POINT, and -Wunused-function
+// would otherwise be right to complain. Deleting it instead would delete the
+// only compile-time proof that these signatures still exist.
+[[maybe_unused]] static void verifierSurface() {
     LicenseVerifier v("-----BEGIN PUBLIC KEY-----\nnot-a-key\n-----END PUBLIC KEY-----\n");
     LicenseVerifier explicitAlgo("pem", SignatureAlgorithm::Ed25519);
 

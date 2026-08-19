@@ -36,3 +36,6 @@ license.lic
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# Local WSL build/verify helpers (developer scratch, not part of the repo)
+.wsl_*.sh
