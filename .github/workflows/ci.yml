@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The license-freshness job below gates on github.event_name == 'schedule',
+  # so without this trigger it could never run. Monthly, on the 1st at 03:00 UTC.
+  schedule:
+    - cron: '0 3 1 * *'
+
+# Two-tier design, and the tiering is the point.
+#
+# GitHub does not expose repository secrets to workflows triggered by pull
+# requests from FORKS. So any job that needs the proprietary SDK cannot run on
+# outside contributions. If an SDK job were the required check, every outside PR
+# would show red, and a failing build would be the first thing a prospect saw.
+#
+# Therefore: the STUB build is the primary required check and runs on every PR.
+# SDK builds run on push to main only, where secrets are available.
+#
+# A consequence worth stating: every line outside the licensing gate must compile
+# and test with no SDK present. That is a design constraint, not an accident.
+
+jobs:
+  # ---------------------------------------------------------------- required
+  stub:
+    name: "Stub build (required)"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6 from the distro
+        # Ubuntu 22.04 ships Qt 6.2.4. The build targets 6.2 precisely so this
+        # works with apt and needs no Qt installer action or license prompt.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev cmake ninja-build
+
+      - name: Sources are ASCII-only, no BOMs
+        run: python3 scripts/check_ascii.py
+
+      - name: Configure (no SDK -- uses the API stub)
+        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        # --no-tests=error catches the CMake trap where add_test() before
+        # enable_testing() silently registers nothing and ctest reports success.
+        run: ctest --test-dir build --output-on-failure --timeout 60 --no-tests=error
+
+      # ------------------------------------------------ compliance guards
+      - name: SDK header confined to the licensing gate
+        # The whole integration must stay in one readable translation unit. If
+        # rockyguard.h spreads through the app, "the integration is five lines"
+        # stops being true and nobody notices.
+        run: |
+          hits=$(grep -rln "rockyguard/rockyguard.h" --include=*.cpp --include=*.h \
+                   examples/ tests/ | grep -v -E "examples/01-minimal/main.cpp|licensing/gate.cpp|tests/api_canary.cpp" || true)
+          if [ -n "$hits" ]; then
+            echo "::error::rockyguard.h included outside the permitted files:"; echo "$hits"; exit 1
+          fi
+          echo "OK: SDK header confined."
+
+      - name: No forbidden GPL-3.0 Qt module referenced
+        # Qt Quick 3D, Quick 3D Physics, Charts, Data Visualization and Graphs are
+        # GPL-3.0-only in the open-source offering. Linking any of them into a
+        # binary that also links the proprietary SDK is a violation.
+        run: |
+          hits=$(grep -rniE "Qt6::(Quick3D|Quick3DPhysics|Charts|DataVisualization|Graphs)|QtCharts|QtDataVisualization|QtQuick3D" \
+                   --include=*.txt --include=*.cmake --include=*.cpp --include=*.h . || true)
+          if [ -n "$hits" ]; then
+            echo "::error::GPL-3.0 Qt module referenced. See THIRD-PARTY.md."; echo "$hits"; exit 1
+          fi
+          echo "OK: no GPL-3.0 Qt modules."
+
+      - name: No binaries or archives committed
+        # Source-only distribution is the compliance strategy: LGPLv3 s.4 attaches
+        # when a combined BINARY is conveyed. Committing an artifact breaks it.
+        run: |
+          hits=$(git ls-files | grep -iE '\.(exe|dll|so|dylib|lib|a|obj|zip|7z|tar|tar\.gz|tgz|pdb)$' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::binary or archive committed -- see THIRD-PARTY.md."; echo "$hits"; exit 1
+          fi
+          echo "OK: no binaries committed."
+
+      - name: No credentials or private keys committed
+        run: |
+          hits=$(git ls-files | grep -iE '(^|/)(private.*\.pem|.*\.key)$' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::possible private key committed."; echo "$hits"; exit 1
+          fi
+          echo "OK: no private keys."
+
+  # ------------------------------------------------------- main branch only
+  sdk:
+    name: "SDK build (${{ matrix.os }} / ${{ matrix.config }})"
+    # Fork PRs cannot read secrets, so this would fail through no fault of the
+    # contributor. Restrict it to push events on our own repo.
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Debug is included deliberately. It is the highest-risk configuration:
+          # it needs rockyguard_mdd.lib rather than rockyguard.lib, and Debug is
+          # what an evaluator gets by pressing F5.
+          - { os: windows-2022, config: Release }
+          - { os: windows-2022, config: Debug }
+          - { os: ubuntu-22.04, config: Release }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6 (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev ninja-build
+
+      - name: Install Qt 6 (Windows)
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          # Shared build only. A static Qt would trip the FATAL_ERROR in
+          # CMakeLists.txt by design -- see THIRD-PARTY.md.
+          archives: 'qtbase'
+
+      - name: Fetch the SDK
+        # RG_SDK_URL / RG_SDK_TOKEN are repository secrets. The SDK is never
+        # committed and never cached to a public location.
+        env:
+          RG_SDK_URL: ${{ secrets.RG_SDK_URL }}
+          RG_SDK_TOKEN: ${{ secrets.RG_SDK_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$RG_SDK_URL" ]; then
+            echo "::error::RG_SDK_URL is not set. Configure the repository secret."
+            exit 1
+          fi
+          mkdir -p .sdk
+          curl -sSfL -H "Authorization: Bearer $RG_SDK_TOKEN" "$RG_SDK_URL" -o sdk.zip
+          unzip -q sdk.zip -d .sdk
+          echo "RG_ROOT=$(find .sdk -maxdepth 2 -name include -type d | head -1 | xargs dirname)" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DROCKYGUARD_ROOT="$RG_ROOT"
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }}
+
+      - name: Test
+        # A modal dialog on Windows would hang this job until the job timeout, so
+        # tests install CRT no-dialog handlers (see tests/api_canary.cpp) AND we
+        # cap every test here. Belt and braces, because a hung runner is
+        # expensive and the failure looks like an infrastructure problem.
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure --timeout 60 --no-tests=error
+
+  # ------------------------------------------------------------- repo rot
+  license-freshness:
+    name: "Sample licenses still valid"
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Warn if the valid sample license expires soon
+        # A flagship public demo that silently starts reporting "your license
+        # expired" on some future Tuesday is the failure mode that arrives when
+        # nobody is watching. Catch it 18 months out.
+        run: |
+          f=examples/licenses/valid.lic
+          [ -f "$f" ] || { echo "no sample license yet -- skipping"; exit 0; }
+          exp=$(python3 -c "import json,sys;print(json.load(open('$f')).get('license',{}).get('expires_at',''))")
+          echo "valid.lic expires_at: $exp"
+          python3 - "$exp" <<'PY'
+          import sys, datetime
+          raw = sys.argv[1]
+          if not raw or raw == "permanent":
+              print("permanent or unset -- nothing to check"); raise SystemExit(0)
+          exp = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+          left = (exp - datetime.datetime.now(datetime.timezone.utc)).days
+          print(f"{left} days remaining")
+          if left < 548:
+              print("::error::valid.lic has under 18 months left. Re-mint it.")
+              raise SystemExit(1)
+          PY

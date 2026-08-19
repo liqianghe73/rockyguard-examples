@@ -1,0 +1,38 @@
+# Build trees
+build/
+build-*/
+out/
+cmake-build-*/
+
+# The proprietary SDK must never be committed. It is unpacked locally and
+# pointed at with -DROCKYGUARD_ROOT=... See README.md.
+.sdk/
+sdk/
+*.lib
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.obj
+
+# Real licenses and private keys. The repo ships SAMPLE licenses only, under
+# examples/licenses/, and those are added with `git add -f`.
+*.pem
+*.key
+private*.pem
+license.lic
+*.lic
+!examples/licenses/*.lic
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
+__pycache__/
