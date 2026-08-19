@@ -31,6 +31,11 @@ include(cmake/RockyGuard.cmake)
 enable_testing()
 
 option(RGX_BUILD_QT_CAD "Build the Qt CAD example (needs Qt 6 Widgets)" ON)
+# CI sets this. A missing Qt makes the CAD example SKIP, which means a missing
+# dependency would show up as a GREEN build that compiled none of it -- worse
+# than a red one. Turning the skip into a hard error is the only way the
+# required check can be trusted.
+option(RGX_REQUIRE_QT "Fail configuration if Qt 6 Widgets is not found" OFF)
 
 add_subdirectory(examples/01-minimal)
 
@@ -57,9 +62,19 @@ if(RGX_BUILD_QT_CAD)
             message(STATUS "examples/02-qt-cad not present yet -- skipping.")
         endif()
     else()
+        set(_rgx_qt_help
+            "  Ubuntu/Debian: sudo apt install qt6-base-dev libgl-dev\n"
+            "                 (libgl-dev is REQUIRED -- Qt6Gui runs\n"
+            "                 find_package(OpenGL) and needs GL/gl.h, which\n"
+            "                 qt6-base-dev does not pull in. Look above for\n"
+            "                 'Could NOT find OpenGL'.)\n"
+            "  Windows:       -DCMAKE_PREFIX_PATH=C:/Qt/6.8.0/msvc2022_64")
+        if(RGX_REQUIRE_QT)
+            message(FATAL_ERROR "Qt6 Widgets not found, and RGX_REQUIRE_QT is ON.\n"
+                                ${_rgx_qt_help})
+        endif()
         message(STATUS "Qt6 Widgets not found -- skipping the Qt CAD example.")
-        message(STATUS "  Ubuntu/Debian: sudo apt install qt6-base-dev")
-        message(STATUS "  Windows:       -DCMAKE_PREFIX_PATH=C:/Qt/6.8.0/msvc2022_64")
+        message(STATUS ${_rgx_qt_help})
     endif()
 endif()
 

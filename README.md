@@ -40,8 +40,14 @@ cmake --build build --config Release
 Prerequisites, stated precisely rather than optimistically -- this is two
 commands plus a dependency, not one command:
 
-- **Ubuntu 22.04+**: `sudo apt install qt6-base-dev cmake` (system Qt is 6.2.4;
-  the build targets 6.2 so this works without the Qt installer)
+- **Ubuntu 22.04+**: `sudo apt install qt6-base-dev libgl-dev cmake`
+  (system Qt is 6.2.4; the build targets 6.2 so this works without the Qt
+  installer). **`libgl-dev` is not optional** -- Qt6Gui's CMake config runs
+  `find_package(OpenGL)` and needs `/usr/include/GL/gl.h`, which `qt6-base-dev`
+  does not pull in. Leave it out and configure prints
+  `Could NOT find OpenGL (missing: OPENGL_INCLUDE_DIR)` followed by
+  `Qt6 Widgets not found`, and the CAD example is silently skipped. The error
+  never mentions that GL headers are the cause.
 - **Windows**: MSVC 2019+ and Qt 6, with
   `-DCMAKE_PREFIX_PATH=C:/Qt/6.8.0/msvc2022_64`
 

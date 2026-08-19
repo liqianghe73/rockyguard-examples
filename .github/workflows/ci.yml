@@ -33,15 +33,25 @@ jobs:
       - name: Install Qt 6 from the distro
         # Ubuntu 22.04 ships Qt 6.2.4. The build targets 6.2 precisely so this
         # works with apt and needs no Qt installer action or license prompt.
+        #
+        # libgl-dev is REQUIRED, not incidental: Qt6Gui's config does
+        # find_package(OpenGL) and needs /usr/include/GL/gl.h, which qt6-base-dev
+        # does not depend on. Without it find_package(Qt6) fails, the CAD example
+        # is SKIPPED, and this job goes GREEN having compiled none of it -- which
+        # is worse than a red build. The guard step below turns that into a
+        # failure.
         run: |
           sudo apt-get update
-          sudo apt-get install -y qt6-base-dev cmake ninja-build
+          sudo apt-get install -y qt6-base-dev libgl-dev cmake ninja-build
 
       - name: Sources are ASCII-only, no BOMs
         run: python3 scripts/check_ascii.py
 
       - name: Configure (no SDK -- uses the API stub)
-        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+        # RGX_REQUIRE_QT=ON turns a missing Qt from a silent SKIP into a hard
+        # configure failure. Without it, forgetting libgl-dev produces a GREEN
+        # required check that compiled none of the CAD example.
+        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DRGX_REQUIRE_QT=ON
 
       - name: Build
         run: cmake --build build
@@ -116,7 +126,8 @@ jobs:
 
       - name: Install Qt 6 (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev ninja-build
+        # libgl-dev for the same reason as the stub job -- see the comment there.
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev libgl-dev ninja-build
 
       - name: Install Qt 6 (Windows)
         if: runner.os == 'Windows'
@@ -146,7 +157,7 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DROCKYGUARD_ROOT="$RG_ROOT"
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DRGX_REQUIRE_QT=ON -DROCKYGUARD_ROOT="$RG_ROOT"
 
       - name: Build
         run: cmake --build build --config ${{ matrix.config }}
