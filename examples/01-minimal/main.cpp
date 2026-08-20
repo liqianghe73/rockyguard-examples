@@ -23,7 +23,7 @@
 // It is a PUBLIC key: shipping it inside your binary is the intended design.
 // The matching private key never leaves your build machine.
 static const char* kPublicKey = R"(-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
+MCowBQYDK2VwAyEAIicBg8+AY+6zuO8v5OwRXeSrQKlmMKopMYZxkAv3tVc=
 -----END PUBLIC KEY-----
 )";
 
@@ -65,6 +65,7 @@ static const char* explain(rockyguard::LicenseStatus s) {
 static void report(const std::string& path,
                    rockyguard::LicenseVerifier& verifier,
                    const rockyguard::LicenseResult& loaded,
+                   const rockyguard::LicenseResult& node,
                    bool licensed,
                    bool has3D,
                    bool hasStl) {
@@ -79,6 +80,21 @@ static void report(const std::string& path,
     }
     if (loaded.status == rockyguard::LicenseStatus::InGracePeriod) {
         std::printf("grace left   : %d day(s)\n", loaded.grace_days_remaining);
+    }
+
+    // Report the node-lock check SEPARATELY. load() can succeed on a licence that
+    // is cryptographically perfect and simply belongs to another machine: it
+    // verifies the signature and the dates, and knows nothing about hardware. Show
+    // only loaded.status and such a licence prints "valid" and then silently
+    // behaves as unlicensed, which is the least debuggable outcome possible and a
+    // very common real support case.
+    if (static_cast<bool>(loaded) && !static_cast<bool>(node)) {
+        std::printf("node lock    : FAILED -- %s\n", explain(node.status));
+        if (!node.message.empty()) {
+            std::printf("               %s\n", node.message.c_str());
+        }
+    } else if (static_cast<bool>(node)) {
+        std::printf("node lock    : matches this machine\n");
     }
 
     if (licensed) {
@@ -120,13 +136,15 @@ int main(int argc, char** argv) {
         // ---- the integration: five lines ---------------------------------
         rockyguard::LicenseVerifier verifier(kPublicKey);
         const rockyguard::LicenseResult loaded = verifier.load(path);
-        const bool licensed = static_cast<bool>(loaded) &&
-                              static_cast<bool>(verifier.check_node_locked());
+        // Keep the node-lock RESULT, not just a bool, so its reason can be shown.
+        const rockyguard::LicenseResult node =
+            static_cast<bool>(loaded) ? verifier.check_node_locked() : loaded;
+        const bool licensed = static_cast<bool>(node);
         const bool has3D = licensed && static_cast<bool>(verifier.check_feature(kFeature3D));
         const bool hasStl = licensed && static_cast<bool>(verifier.check_feature(kFeatureStl));
         // ---- end of integration ------------------------------------------
 
-        report(path, verifier, loaded, licensed, has3D, hasStl);
+        report(path, verifier, loaded, node, licensed, has3D, hasStl);
     } catch (const std::exception& e) {
         std::fprintf(stderr,
                      "RockyGuard could not use the public key compiled into this binary.\n"

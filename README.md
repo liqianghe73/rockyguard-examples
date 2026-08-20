@@ -55,6 +55,46 @@ Both Release and Debug are supported on Windows. CMake selects
 `rockyguard_mdd.lib` for Debug and `rockyguard.lib` for Release automatically --
 mixing them produces a wall of LNK2038 errors.
 
+## Try every licence state, without emailing anyone
+
+Five real signed licences ship in [`examples/licenses/`](examples/licenses/). Swap
+one file and watch the app change tier:
+
+```bash
+RGCAD_LICENSE=examples/licenses/valid.lic         ./rgcad   # Pro: 3D + STL unlocked
+RGCAD_LICENSE=examples/licenses/stl-only.lic      ./rgcad   # Draft: 3D locked, STL unlocked
+RGCAD_LICENSE=examples/licenses/grace.lic         ./rgcad   # expired, in grace, Pro still works
+RGCAD_LICENSE=examples/licenses/wrong-machine.lic ./rgcad   # Draft: hardware mismatch
+./01-minimal examples/licenses/expired.lic                  # the console version of the same
+```
+
+Verified on Ubuntu 22.04 / Qt 6.2.4 and on Windows / MSVC, against the real SDK:
+
+| Sample | `status` | Tier |
+|---|---|---|
+| `valid.lic` | valid | **Pro** |
+| `stl-only.lic` | valid | Draft, STL export unlocked |
+| `expired.lic` | expired | Draft |
+| `grace.lic` | expired, inside grace period, 25 days left | **Pro** |
+| `wrong-machine.lic` | valid, but `Hardware mismatch: 0 of 4 required components matched` | Draft |
+| *(no file)* | not a license file we can parse | Draft |
+
+Two of those repay a closer look. `stl-only.lic` is a completely valid licence
+whose signature verifies -- 3D is locked purely because `cad_3d` is absent from
+its feature list, which is per-feature gating rather than two SKUs. And
+`grace.lic` is expired with Pro still working and the remaining days reported,
+because a CAD tool must never hold a drawing hostage over a late renewal. The
+rule the code follows is **fail closed on capability, fail open on data**.
+
+`rgcad` exits 0 in every one of those states. The Draft tier is a product, not an
+error, and the app never refuses to start.
+
+The samples are deliberately **not** node-locked (`--threshold 0`) so they verify
+on any machine, and they carry a placeholder fingerprint rather than anyone's real
+hardware hashes. Never ship a licence minted that way --
+[`examples/licenses/README.md`](examples/licenses/README.md) explains why and how
+to mint your own.
+
 ## What license enforcement does and does not do
 
 Worth being straight about, because this audience will test the claim.

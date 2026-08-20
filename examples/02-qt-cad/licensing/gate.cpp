@@ -22,7 +22,7 @@ namespace {
 // compiling it into the binary is the intended design. The private key never
 // leaves your build machine.
 const char* kPublicKey = R"(-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
+MCowBQYDK2VwAyEAIicBg8+AY+6zuO8v5OwRXeSrQKlmMKopMYZxkAv3tVc=
 -----END PUBLIC KEY-----
 )";
 

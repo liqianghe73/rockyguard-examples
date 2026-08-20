@@ -1,0 +1,4 @@
+{
+  "payload": "{\"expires_at\":\"2026-08-15T00:00:00Z\",\"features\":[\"cad_3d\",\"cad_stl_export\"],\"fingerprint_match_threshold\":0,\"grace_period_days\":30,\"hardware_fingerprint\":\"0000000000000000000000000000000000000000000000000000000000000000|1111111111111111111111111111111111111111111111111111111111111111|2222222222222222222222222222222222222222222222222222222222222222|3333333333333333333333333333333333333333333333333333333333333333\",\"issued_at\":\"2026-08-20T12:56:33Z\",\"license_id\":\"RGCAD-GRACE\",\"licensee\":\"rgcad demo (grace)\",\"max_concurrent_users\":0,\"metadata\":{},\"product\":\"rgcad\",\"type\":\"node_locked\",\"version_range\":\"\"}",
+  "signature": "j0VdWbTtK5gBegd+/V9djiNmtJul88LkjHO0dcITTgYkhMuLwiLltNVscNHImehS/vTU+c79z/MNjHEYjSSNBg=="
+}
