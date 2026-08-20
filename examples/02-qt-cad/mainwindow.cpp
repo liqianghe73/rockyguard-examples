@@ -149,7 +149,25 @@ QWidget* MainWindow::buildRightPane() {
             break;
 
         case lic::State::NoLicense:
-            if (s.keyError) {
+            if (s.stub) {
+                // Say what is actually true: this binary has no SDK, so it never
+                // even opened the file. Claiming "no license file found" over a
+                // file the user can see with ls is the fastest way to lose their
+                // trust in everything else the pane says.
+                body = QStringLiteral(
+                           "<p><b>This binary cannot verify licenses.</b> It was built "
+                           "against the RockyGuard API stub, not the SDK, so no license "
+                           "file is ever opened and Pro is unreachable by "
+                           "construction.</p>"
+                           "<p>License path: <code>%1</code><br>"
+                           "A file %2 there.</p>"
+                           "<p>Rebuild against the SDK:<br>"
+                           "<code>cmake -B build -S . "
+                           "-DROCKYGUARD_ROOT=/path/to/customer-bundle</code></p>")
+                           .arg(QString::fromStdString(lic::licensePath()),
+                                s.filePresent ? QStringLiteral("<b>is</b>")
+                                              : QStringLiteral("is <b>not</b>"));
+            } else if (s.keyError) {
                 // Our bug, not theirs. Say so plainly rather than reporting
                 // "unlicensed", which would send them hunting for a license file
                 // that was never the problem.
@@ -180,7 +198,8 @@ QWidget* MainWindow::buildRightPane() {
             break;
     }
 
-    if (s.stub) {
+    // The stub already explains itself in full above, so do not repeat it.
+    if (s.stub && s.state != lic::State::NoLicense) {
         body += QStringLiteral(
             "<hr><p style='color:#7a8a9b'>Built against the RockyGuard <b>API "
             "stub</b>, so no license can verify and Pro is unreachable by "

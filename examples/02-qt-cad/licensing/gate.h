@@ -41,6 +41,10 @@ struct Status {
     bool inGracePeriod = false;
     bool stub = false;        // built against the API stub, not the SDK
     bool keyError = false;    // the embedded public key would not parse: OUR bug
+    // Whether a file actually exists at licensePath(). Recorded separately from
+    // `state` because a stub build reaches no verdict at all, and the UI must not
+    // claim a file is missing when it simply was never read.
+    bool filePresent = false;
 };
 
 // Feature names. Just strings in the license file, so they are yours to choose --

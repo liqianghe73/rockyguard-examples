@@ -35,6 +35,14 @@ std::string resolvePath() {
     return "rgcad.lic";
 }
 
+bool fileExists(const std::string& path) {
+    if (FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fclose(f);
+        return true;
+    }
+    return false;
+}
+
 std::once_flag g_once;
 Status g_status;
 std::set<std::string> g_features;
@@ -42,15 +50,18 @@ std::set<std::string> g_features;
 // Map the SDK's 20 statuses onto our three. The mapping is the interesting part:
 // only Valid and InGracePeriod are Valid, and everything else that is not "the
 // file simply is not there" is a FAILURE the user must be told about.
-void classify(const rockyguard::LicenseResult& r, const std::string& path) {
+// No `path` parameter: the filesystem probe moved to initialize(), which runs it
+// unconditionally so that every downstream message can be accurate about the file
+// even on paths that never open it. Result is in g_status.filePresent.
+void classify(const rockyguard::LicenseResult& r) {
     using S = rockyguard::LicenseStatus;
 
     // In a stub build there is no licensing ANSWER, so there is nothing to
-    // reject. Without this, the fopen probe below sees a real file, decides
-    // "present but unreadable", and the UI shouts "License rejected" in red --
-    // on the exact command the app's own pane tells the reader to run
-    // (RGCAD_LICENSE=examples/licenses/valid.lic). A false error on the repo's
-    // sales surface, in the DEFAULT build.
+    // reject and nothing to confirm. Returning NoLicense here keeps the UI from
+    // shouting "License rejected" over a perfectly good file -- but the UI must
+    // also not claim the file is MISSING, which is what it did until
+    // Status::filePresent existed. The stub never opens the file at all, so it
+    // gets to say exactly that and nothing more.
     if (g_status.stub) {
         g_status.state = State::NoLicense;
         return;
@@ -70,8 +81,7 @@ void classify(const rockyguard::LicenseResult& r, const std::string& path) {
     // actually there. Without this, a first run with no license reports an
     // alarming parse error instead of "you are on the Draft tier".
     if (r.status == S::MalformedFile) {
-        if (FILE* f = std::fopen(path.c_str(), "rb")) {
-            std::fclose(f);
+        if (g_status.filePresent) {
             g_status.state = State::Invalid;  // present but unreadable
         } else {
             g_status.state = State::NoLicense;
@@ -85,6 +95,11 @@ void classify(const rockyguard::LicenseResult& r, const std::string& path) {
 
 void initialize() {
     const std::string path = resolvePath();
+
+    // Probed unconditionally and BEFORE anything else, so every later message can
+    // be accurate about the file regardless of which path we take. The stub build
+    // needs this precisely because it never opens the file itself.
+    g_status.filePresent = fileExists(path);
 
 #ifdef ROCKYGUARD_STUB
     g_status.stub = true;
@@ -106,7 +121,7 @@ void initialize() {
         rockyguard::LicenseVerifier verifier(kPublicKey);
 
         const rockyguard::LicenseResult loaded = verifier.load(path);
-        classify(loaded, path);
+        classify(loaded);
 
         if (g_status.state == State::Valid) {
             // Node-lock is a separate check from load(). A license can verify
