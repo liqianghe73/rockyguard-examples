@@ -39,3 +39,6 @@ __pycache__/
 
 # Local WSL build/verify helpers (developer scratch, not part of the repo)
 .wsl_*.sh
+
+# Stray lock/cache artifacts from tooling
+.lck_cache_*
