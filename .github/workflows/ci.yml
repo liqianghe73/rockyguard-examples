@@ -61,6 +61,33 @@ jobs:
         # enable_testing() silently registers nothing and ctest reports success.
         run: ctest --test-dir build --output-on-failure --timeout 60 --no-tests=error
 
+      - name: The 3D gate is structural, and the extruder is correct
+        # Asserts on rgcad's RGCAD_SMOKE state line rather than its exit code. An
+        # exit code proves only that nothing crashed; it cannot tell a working
+        # extrusion from an empty viewport, nor a real gate from a hidden widget.
+        #
+        # These run against the API STUB, so every licence reads as unlicensed and
+        # the viewport must be ABSENT. The licensed half is asserted in the SDK job.
+        env:
+          QT_QPA_PLATFORM: offscreen
+          RGCAD_SMOKE: '1'
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/rgt
+          cat > /tmp/rgt/square.rgcad <<'JSON'
+          { "format": "rgcad", "version": 1, "entities": [
+            { "id": 1, "kind": "polyline", "closed": true,
+              "pts": [[0,0],[60,0],[60,40],[0,40]] } ] }
+          JSON
+          out=$(./build/bin/rgcad /tmp/rgt/square.rgcad 2>&1 | grep RGCAD_STATE)
+          echo "$out"
+          # Stub build: no feature can be present, so the viewport must not exist.
+          echo "$out" | grep -q 'viewport=absent' || {
+            echo '::error::viewport was built without cad_3d -- the gate is not structural'; exit 1; }
+          echo "$out" | grep -q 'closed_loop=yes' || {
+            echo '::error::the square profile did not load as a closed loop'; exit 1; }
+          echo 'OK: no cad_3d -> viewport absent, and the loader works.'
+
       # ------------------------------------------------ compliance guards
       - name: SDK header confined to the licensing gate
         # The whole integration must stay in one readable translation unit. If
@@ -180,6 +207,40 @@ jobs:
       - name: Build
         if: steps.sdk.outputs.have_sdk == 'true'
         run: cmake --build build --config ${{ matrix.config }}
+
+      - name: The 3D gate and extruder, WITH a real licence
+        if: steps.sdk.outputs.have_sdk == 'true' && runner.os == 'Linux'
+        # The other half of the gate: with cad_3d present the viewport must be
+        # BUILT and a square profile must extrude to exactly 12 triangles (2 per
+        # cap x 2 caps + 2 per side x 4 sides). A self-intersecting bowtie must be
+        # REFUSED with 0 triangles rather than silently mis-meshed.
+        env:
+          QT_QPA_PLATFORM: offscreen
+          RGCAD_SMOKE: '1'
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/rgt
+          cat > /tmp/rgt/square.rgcad <<'JSON'
+          { "format": "rgcad", "version": 1, "entities": [
+            { "id": 1, "kind": "polyline", "closed": true,
+              "pts": [[0,0],[60,0],[60,40],[0,40]] } ] }
+          JSON
+          cat > /tmp/rgt/bowtie.rgcad <<'JSON'
+          { "format": "rgcad", "version": 1, "entities": [
+            { "id": 1, "kind": "polyline", "closed": true,
+              "pts": [[0,0],[60,40],[60,0],[0,40]] } ] }
+          JSON
+          check() {  # $1=licence $2=drawing $3=pattern $4=why
+            out=$(RGCAD_LICENSE="$1" ./build/bin/rgcad "$2" 2>&1 | grep RGCAD_STATE)
+            echo "  $out"
+            echo "$out" | grep -q "$3" || { echo "::error::$4"; exit 1; }
+          }
+          check examples/licenses/valid.lic    /tmp/rgt/square.rgcad 'viewport=built'  'cad_3d present but no viewport'
+          check examples/licenses/valid.lic    /tmp/rgt/square.rgcad 'triangles=12'    'square profile did not extrude to 12 triangles'
+          check examples/licenses/valid.lic    /tmp/rgt/bowtie.rgcad 'triangles=0'     'self-intersecting bowtie was NOT refused'
+          check examples/licenses/stl-only.lic /tmp/rgt/square.rgcad 'viewport=absent' 'viewport built without cad_3d'
+          check examples/licenses/expired.lic  /tmp/rgt/square.rgcad 'tier=Draft'      'expired licence granted Pro'
+          echo 'OK: gate structural in both directions, extruder correct, bowtie refused.'
 
       - name: Test
         if: steps.sdk.outputs.have_sdk == 'true'

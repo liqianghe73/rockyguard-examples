@@ -17,11 +17,15 @@ add_executable(rgcad
     mainwindow.h
     core/document.cpp
     core/document.h
+    core/mesh.cpp
+    core/mesh.h
     licensing/gate.cpp
     licensing/gate.h
     ui2d/canvas.cpp
     ui2d/canvas.h
     ui2d/commands.h
+    ui3d/viewport.cpp
+    ui3d/viewport.h
 )
 
 target_include_directories(rgcad PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

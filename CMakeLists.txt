@@ -47,6 +47,12 @@ include(cmake/RockyGuard.cmake)
 # just vanish with no warning.
 enable_testing()
 
+# Look for Qt up front, not inside the RGX_BUILD_QT_CAD branch. tests/ needs
+# Qt6::Core for the geometry tests, and add_subdirectory(tests) runs after the
+# branch -- so a find_package hidden inside it would leave Qt6::Core undefined
+# there and the tests would silently not be built.
+find_package(Qt6 6.2 COMPONENTS Core Gui Widgets QUIET)
+
 option(RGX_BUILD_QT_CAD "Build the Qt CAD example (needs Qt 6 Widgets)" ON)
 # CI sets this. A missing Qt makes the CAD example SKIP, which means a missing
 # dependency would show up as a GREEN build that compiled none of it -- worse
@@ -57,7 +63,6 @@ option(RGX_REQUIRE_QT "Fail configuration if Qt 6 Widgets is not found" OFF)
 add_subdirectory(examples/01-minimal)
 
 if(RGX_BUILD_QT_CAD)
-    find_package(Qt6 6.2 COMPONENTS Core Gui Widgets QUIET)
     if(Qt6_FOUND)
         # LGPLv3 permits linking a proprietary application against Qt only while
         # the app remains a "work that uses the Library". Qt's own legal guidance

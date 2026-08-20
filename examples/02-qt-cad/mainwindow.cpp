@@ -16,6 +16,9 @@
 #include <QUndoView>
 #include <QVBoxLayout>
 
+#include <cstdio>
+
+#include "core/mesh.h"
 #include "licensing/gate.h"
 
 namespace {
@@ -69,8 +72,17 @@ MainWindow::MainWindow() {
     connect(m_canvas, &ui2d::Canvas::measurementChanged, this,
             [this](const QString& t) { m_measure->setText(t); });
     connect(m_canvas, &ui2d::Canvas::documentChanged, this, &MainWindow::updateStatus);
+    connect(m_canvas, &ui2d::Canvas::documentChanged, this, &MainWindow::rebuild3D);
     connect(m_canvas, &ui2d::Canvas::selectionChanged, this, &MainWindow::updateStatus);
     connect(&m_undo, &QUndoStack::cleanChanged, this, &MainWindow::refreshTitle);
+
+    // The viewport reports extrusion outcomes -- triangle counts, and the
+    // self-intersection refusal -- straight into the status bar.
+    if (m_viewport) {
+        connect(m_viewport, &ui3d::Viewport::statusChanged, this,
+                [this](const QString& t) { m_solid->setText(t); });
+        m_viewport->rebuild();
+    }
 
     updateStatus();
     refreshTitle();
@@ -109,12 +121,19 @@ QWidget* MainWindow::buildRightPane() {
     title->setWordWrap(true);
 
     if (unlocked) {
+        // Construct the viewport ONLY here. Building it and hiding it would leave
+        // a working 3D view one setVisible() away, which is not a gate.
+        m_viewport = new ui3d::Viewport(&m_doc, pane);
         title->setText(QStringLiteral(
-            "<h2>3D &mdash; unlocked</h2>"
-            "<p>The <code>cad_3d</code> feature is present in this license, so the "
-            "3D viewport is available.</p>"
-            "<p style='color:#8dc8f0'>The viewport itself lands in the next "
-            "commit; this pane is the gate, and the gate works.</p>"));
+            "<b>3D &mdash; unlocked</b> &nbsp; <span style='color:#7a8a9b'>"
+            "cad_3d present. Drag to orbit, wheel to zoom, <code>[</code> / "
+            "<code>]</code> height, <code>W</code> wireframe, <code>R</code> reset."
+            "</span>"));
+        layout->addWidget(title);
+        layout->addWidget(m_viewport, 1);
+        // The layout is finished for the unlocked case: the viewport IS the pane.
+        layout->setContentsMargins(8, 8, 8, 8);
+        return pane;
     } else {
         // Name the flag AND the file. A developer evaluating RockyGuard wants to
         // know exactly where the decision is made, and telling them is more
@@ -244,10 +263,7 @@ void MainWindow::buildActions() {
         m_actExportStl->setToolTip(
             QStringLiteral("Requires the cad_stl_export feature (gate: licensing/gate.cpp)"));
     }
-    connect(m_actExportStl, &QAction::triggered, this, [this] {
-        QMessageBox::information(this, QStringLiteral("Export STL"),
-                                 QStringLiteral("STL export arrives with the 3D viewport."));
-    });
+    connect(m_actExportStl, &QAction::triggered, this, &MainWindow::exportStl);
 
     file->addSeparator();
     addAct(file, QStringLiteral("E&xit"), QKeySequence::Quit, this, &QWidget::close);
@@ -318,6 +334,7 @@ void MainWindow::buildToolBar() {
 
 void MainWindow::buildStatusBar() {
     m_coords = new QLabel(QStringLiteral("X 0.00  Y 0.00"), this);
+    m_solid = new QLabel(this);
     m_measure = new QLabel(this);
     m_modes = new QLabel(this);
     m_counts = new QLabel(this);
@@ -329,6 +346,7 @@ void MainWindow::buildStatusBar() {
     statusBar()->addWidget(m_coords);
     statusBar()->addWidget(m_measure);
     statusBar()->addWidget(m_modes);
+    statusBar()->addWidget(m_solid, 1);
     statusBar()->addPermanentWidget(m_counts);
     statusBar()->addPermanentWidget(m_tier);
 }
@@ -340,6 +358,49 @@ void MainWindow::buildDocks() {
     dock->setWidget(view);
     addDockWidget(Qt::RightDockWidgetArea, dock);
     dock->hide();  // available from the dock context menu, off by default
+}
+
+// Null-safe by construction: with cad_3d absent there is no viewport to talk to,
+// and every caller goes through here rather than touching m_viewport directly.
+void MainWindow::rebuild3D() {
+    if (m_viewport) m_viewport->rebuild();
+}
+
+void MainWindow::exportStl() {
+    // Defensive second check. The menu item is already disabled without the
+    // feature, but a disabled QAction can still be triggered programmatically,
+    // and this is the capability boundary rather than the UI.
+    if (!lic::has(lic::kStlExport)) {
+        QMessageBox::information(
+            this, QStringLiteral("Export STL"),
+            QStringLiteral("STL export requires the cad_stl_export feature.\n\n"
+                           "Gate: licensing/gate.cpp"));
+        return;
+    }
+    if (!m_viewport || !m_viewport->hasMesh()) {
+        QMessageBox::information(
+            this, QStringLiteral("Export STL"),
+            QStringLiteral("There is no solid to export yet. Draw a closed polyline "
+                           "in the 2D view first."));
+        return;
+    }
+    QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export STL"),
+                                               QString(),
+                                               QStringLiteral("STL meshes (*.stl)"));
+    if (path.isEmpty()) return;
+    if (!path.endsWith(QStringLiteral(".stl"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".stl");
+    }
+    QString err;
+    if (!core::writeStlBinary(path, m_viewport->mesh(), &err)) {
+        QMessageBox::critical(this, QStringLiteral("Export failed"), err);
+        return;
+    }
+    statusBar()->showMessage(
+        QStringLiteral("Wrote %1 triangles to %2")
+            .arg(m_viewport->mesh().tris.size())
+            .arg(QFileInfo(path).fileName()),
+        5000);
 }
 
 void MainWindow::updateStatus() {
@@ -389,6 +450,36 @@ void MainWindow::newDrawing() {
     refreshTitle();
 }
 
+bool MainWindow::openPath(const QString& path) {
+    const core::LoadResult r = m_doc.load(path);
+    if (!r) {
+        // stderr, not QMessageBox: a modal here would hang any unattended run,
+        // which is exactly the trap a GUI smoke test must not contain.
+        std::fprintf(stderr,
+                     "rgcad: cannot open %s\n"
+                     "  %s\n",
+                     path.toLocal8Bit().constData(), r.error.toLocal8Bit().constData());
+        return false;
+    }
+    m_path = path;
+    m_undo.clear();
+    m_canvas->documentReset();
+    m_canvas->zoomToFit();
+    rebuild3D();
+    updateStatus();
+    refreshTitle();
+    return true;
+}
+
+void MainWindow::printSmokeState() const {
+    const int tris = m_viewport ? m_viewport->mesh().tris.size() : 0;
+    std::printf("RGCAD_STATE tier=%s entities=%d closed_loop=%s viewport=%s triangles=%d\n",
+                lic::has(lic::k3D) ? "Pro" : "Draft", m_doc.count(),
+                m_doc.hasClosedLoop() ? "yes" : "no",
+                m_viewport ? "built" : "absent", tris);
+    std::fflush(stdout);
+}
+
 void MainWindow::openDrawing() {
     if (!confirmDiscard()) return;
     const QString path = QFileDialog::getOpenFileName(
@@ -405,6 +496,7 @@ void MainWindow::openDrawing() {
     m_undo.clear();
     m_canvas->documentReset();
     m_canvas->zoomToFit();
+    rebuild3D();
     updateStatus();
     refreshTitle();
 }

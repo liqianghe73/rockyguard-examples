@@ -5,6 +5,7 @@
 
 #include "core/document.h"
 #include "ui2d/canvas.h"
+#include "ui3d/viewport.h"
 
 class QLabel;
 class QAction;
@@ -24,6 +25,13 @@ public:
     MainWindow();
     ~MainWindow() override;
 
+    // Load a drawing by path, for the command line. Reports failures to stderr
+    // rather than a modal, so a scripted run cannot hang on a dialog.
+    bool openPath(const QString& path);
+    // One line of machine-readable state for RGCAD_SMOKE, so a headless check can
+    // assert on tier, entity count and triangle count instead of just exit 0.
+    void printSmokeState() const;
+
 protected:
     // Without this, File>Exit and the window-manager close button discard
     // unsaved work silently, while File>New on identical state prompts.
@@ -36,6 +44,8 @@ private slots:
     bool saveDrawingAs();
     void showLicenseInfo();
     void updateStatus();
+    void exportStl();
+    void rebuild3D();
 
 private:
     void buildActions();
@@ -49,6 +59,9 @@ private:
     core::Document m_doc;
     QUndoStack m_undo;
     ui2d::Canvas* m_canvas = nullptr;
+    // Null whenever cad_3d is absent, and that is the gate: there is no 3D view
+    // sitting hidden behind a flag, because it is never built.
+    ui3d::Viewport* m_viewport = nullptr;
     QString m_path;
 
     QLabel* m_coords = nullptr;
@@ -56,6 +69,7 @@ private:
     QLabel* m_modes = nullptr;
     QLabel* m_counts = nullptr;
     QLabel* m_tier = nullptr;
+    QLabel* m_solid = nullptr;
 
     QAction* m_actSnap = nullptr;
     QAction* m_actOrtho = nullptr;
